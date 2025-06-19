@@ -9,7 +9,7 @@ live2d_model:
   modelName: Nahida_1080
 llm_model:
   Gemini_config:
-    api_key: AIzaSyC860UrPsGkzgvv3evjTB26IjwKXA1SXKA
+    api_key: testApi
     enable: true
     model: gemini-2.5-flash
   Ollama_config:
