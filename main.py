@@ -66,7 +66,7 @@ def capture_and_save_screen(method="pil", filepath="./temp/screenshot.png"):
     """
     # 确保temp目录存在
     os.makedirs("./temp", exist_ok=True)
-    print("不支持的截图方法，使用PIL作为默认方法")
+    # print("不支持的截图方法，使用PIL作为默认方法")
     image = capture_screen_pil()
 
     if image:
@@ -317,14 +317,14 @@ def llm_handler(config, text):
         if text == "-1":
             return gemini_chat_with_pic(config["llm_model"]["Gemini_config"]["api_key"],
                                         config["llm_model"]["Gemini_config"]["model"],
-                                        make_final_prompt(config["llm_model"]["PersonalityPrompt"],
-                                                          config["llm_model"]["UserInfoPrompt"],
+                                        make_final_prompt(config["llm_model"]["personalityPrompt"],
+                                                          config["llm_model"]["userInfoPrompt"],
                                                           "-1"))
         else:
             return gemini_chat(config["llm_model"]["Gemini_config"]["api_key"],
                                         config["llm_model"]["Gemini_config"]["model"],
-                                        make_final_prompt(config["llm_model"]["PersonalityPrompt"],
-                                                          config["llm_model"]["UserInfoPrompt"],
+                                        make_final_prompt(config["llm_model"]["personalityPrompt"],
+                                                          config["llm_model"]["userInfoPrompt"],
                                                           text))
     elif config["llm_model"]["model_Interface"] == "Ollama":
         if text == "-1":
@@ -399,12 +399,15 @@ def tts_handler(config,text):
     session.trust_env = False
 
     try:
+        # 构建正确的base URL
+        base_url = f"{config['gpt-sovits']['url']}:{config['gpt-sovits']['port']}"
+        
         # 先切换 GPT 和 SoVITS 模型
-        gpt_response = session.get(config["gpt-sovits"]["url"] + "/"+config["gpt-sovits"]["port"],params={
+        gpt_response = session.get(f"{base_url}/set_gpt_weights", params={
             "weights_path": config["gpt-sovits"]["ckpt_model_path"]
         })
         print(f"GPT模型切换响应: {gpt_response.status_code}")
-        sovits_response = session.get(config["gpt-sovits"]["url"] + "/"+config["gpt-sovits"]["port"], params={
+        sovits_response = session.get(f"{base_url}/set_sovits_weights", params={
             "weights_path": config["gpt-sovits"]["pth_model_path"]
         })
         print(f"SoVITS模型切换响应: {sovits_response.status_code}")
@@ -414,11 +417,18 @@ def tts_handler(config,text):
             return None
 
         # 然后进行 TTS 合成
-        url= config["gpt-sovits"]["url"] + "/"+config["gpt-sovits"]["port"] + "/tts"
+        url = f"{base_url}/tts"
+        
+        # 从参考音频文件名中提取prompt_text（去除扩展名）
+        ref_audio_path = config["gpt-sovits"]["reference_audio_path"]
+        prompt_text = os.path.splitext(os.path.basename(ref_audio_path))[0]
+        
         payload = {
             "text": text,
             "text_lang": "zh",
-            "ref_audio_path": config["gpt-sovits"]["reference_audio_path"],
+            "ref_audio_path": ref_audio_path,
+            "prompt_text": prompt_text,
+            "prompt_lang": "zh",
             "text_split_method": "cut5",
             "media_type": "wav",
             "batch_size": 12#对于绝大多数设备而言，这个值完全可以承受
@@ -516,12 +526,13 @@ if __name__ == "__main__":
     if config is None:
         print("⚠️ 未加载到配置文件，请检查servereConfig.yaml是否存在")
         print("程序正在退出")
+        exit(1)
     else:
-        base_limit_time=config["screenAutoShot"]
+        base_limit_time = config.get("screenAutoShotTime", 120)
         limit_time = base_limit_time
 
     # 初始化三个截图循环极限时间
-    global_base_limit_time=config["screenAutoShot"]
+    global_base_limit_time = config.get("screenAutoShotTime", 120)
     global_limit_time = global_base_limit_time
     global_past_time = 0
     # 进入主循环
@@ -529,11 +540,21 @@ if __name__ == "__main__":
         if os.path.exists("./Britney-v1/contact/in.txt"):
             with open("./Britney-v1/contact/in.txt", "r", encoding="utf-8") as f:
                 text=f.read()
+            # 在文件句柄关闭后删除文件
+            try:
+                os.remove("./Britney-v1/contact/in.txt")
+            except PermissionError as e:
+                print(f"警告：无法删除输入文件: {e}")
+                # 可以尝试延迟删除
+                time.sleep(0.1)
+                try:
+                    os.remove("./Britney-v1/contact/in.txt")
+                except:
+                    print("延迟删除也失败，文件可能被其他程序占用")
             if text:
                 system_start_time = time.time()
                 past_time=0
                 print(f"识别到用户输入：{text}")
-                os.remove("./contact/in.txt")
                 output_text = llm_handler(config,text)
                 if output_text:
                     print(f"LLM回复内容：{output_text}")
@@ -546,14 +567,14 @@ if __name__ == "__main__":
                     # 处理合成的音频
                     if audio_time is not None:
                         print(f"音频合成完成，时长: {audio_time:.2f} 秒")
-                        with open("./Britney-v1/contact/out.txt", "w", encoding="utf-8") as f:
+                        with open("./Britney-v1/contact/out.json", "w", encoding="utf-8") as f:
                             if audio_time > 3:
                                 time_value = int(audio_time)+1
                             else:
                                 time_value = int(0.5 + len(output_text) * 0.06)
                             # 将输出文本和时长写入文件，同时修改global_limit_time
                             output_data = json.dumps({"text": output_text, "time": time_value})
-                            f.write(output_text)
+                            f.write(output_data)
                             global_limit_time=global_base_limit_time + time_value
                             global_past_time=0
                             # 将音频文件移动到指定目录
@@ -564,14 +585,14 @@ if __name__ == "__main__":
                                 print("警告：服务器可能存在严重错误！音频文件未生成或被神秘的力量移动了！")
                     else:
                         print("音频合成失败或未返回有效时长")
-                        with open("./Britney-v1/contact/out.txt", "w", encoding="utf-8") as f:
+                        with open("./Britney-v1/contact/out.json", "w", encoding="utf-8") as f:
                             output_data = json.dumps({"text": output_text, "time": int(0.5+ len(output_text) * 0.06)})
                             f.write(output_data)
                             global_limit_time = global_base_limit_time + int(0.5+ len(output_text) * 0.06)
                             global_past_time = 0
                 else:
                     print("GPT-SoVITS 未启用，跳过语音合成")
-                    with open("./Britney-v1/contact/out.txt", "w", encoding="utf-8") as f:
+                    with open("./Britney-v1/contact/out.json", "w", encoding="utf-8") as f:
                         output_data = json.dumps({"text": output_text, "time": int(0.5+ len(output_text) * 0.06)})
                         f.write(output_data)
                         global_limit_time = global_base_limit_time + int(0.5+ len(output_text) * 0.06)
@@ -579,97 +600,88 @@ if __name__ == "__main__":
                 # 计算处理时间
                 cost_time = time.time() - system_start_time
                 print(f"一轮处理时间: {cost_time:.2f} 秒")
-                with open("./Britney-v1/contact/config.json", "r",encoding="utf-8") as f:
-                    app_config_data = json.load(f)
-                    app_config_data["isReacted"] = True
-                    app_config_data["favoribility"] = config["favoribility"]+1;
-                    with open("./Britney-v1/contact/config.json", "w", encoding="utf-8") as ff:
-                        json.dump(app_config_data, ff, ensure_ascii=False)
-            else:
-                if global_past_time >= global_limit_time and global_base_limit_time!=-1:
-                    print("捕获桌面")
-                    system_start_time = time.time()
+                # 添加异常处理
+                try:
+                    with open("./Britney-v1/contact/config.json", "r",encoding="utf-8") as f:
+                        app_config_data = json.load(f)
+                        app_config_data["isReacted"] = True
+                        app_config_data["favorability"] = app_config_data.get("favorability", 0) + 1
+                        with open("./Britney-v1/contact/config.json", "w", encoding="utf-8") as ff:
+                            json.dump(app_config_data, ff, ensure_ascii=False)
+                except (FileNotFoundError, json.JSONDecodeError) as e:
+                    print(f"警告：配置文件操作失败: {e}")
+        else:
+            if global_past_time >= global_limit_time and global_base_limit_time!=-1:
+                print("捕获桌面")
+                system_start_time = time.time()
+                try:
                     with open("./Britney-v1/contact/config.json","r",encoding="utf-8") as f:
                         app_config_data = json.load(f)
                         app_config_data["isReacted"] = False
-                        with open("./Britney-v1/contact/config.json", "w", encoding="utf-8") as f:
-                            json.dump(app_config_data, f, ensure_ascii=False)
+                        with open("./Britney-v1/contact/config.json", "w", encoding="utf-8") as ff:
+                            json.dump(app_config_data, ff, ensure_ascii=False)
+                except (FileNotFoundError, json.JSONDecodeError) as e:
+                    print(f"警告：配置文件操作失败: {e}")
 
-                    output_text = llm_handler(config, "-1")
-                    if output_text:
-                        print(f"LLM回复内容：{output_text}")
-                    else:
-                        print("⚠️ LLM回复内容为空或处理失败")
-                        output_text = "抱歉，我无法处理您的请求。"
+                output_text = llm_handler(config, "-1")
+                if output_text:
+                    print(f"LLM回复内容：{output_text}")
+                else:
+                    print("⚠️ LLM回复内容为空或处理失败")
+                    output_text = "抱歉，我无法处理您的请求。"
 
-                    if config["gpt-sovits"]["enable"] and output_text != "抱歉，我无法处理您的请求。":
-                        audio_time = tts_handler(config, output_text)
-                        # 处理合成的音频
-                        if audio_time is not None:
-                            print(f"音频合成完成，时长: {audio_time:.2f} 秒")
-                            with open("./Britney-v1/contact/out.txt", "w", encoding="utf-8") as f:
-                                if audio_time > 3:
-                                    time_value = int(audio_time) + 1
-                                else:
-                                    time_value = int(0.5 + len(output_text) * 0.06)
-                                # 将输出文本和时长写入文件，同时修改global_limit_time
-                                output_data = json.dumps({"text": output_text, "time": time_value})
-                                f.write(output_text)
-                                global_limit_time = global_base_limit_time + time_value
-                                global_past_time = 0
-                                # 将音频文件移动到指定目录
-                                os.makedirs("./Britney-v1/contact", exist_ok=True)
-                                if os.path.exists("./temp/1.wav"):
-                                    shutil.move("./temp/1.wav", "./Britney-v1/contact/1.wav")
-                                else:
-                                    print("警告：服务器可能存在严重错误！音频文件未生成或被神秘的力量移动了！")
-                        else:
-                            print("音频合成失败或未返回有效时长")
-                            with open("./Britney-v1/contact/out.txt", "w", encoding="utf-8") as f:
-                                output_data = json.dumps(
-                                    {"text": output_text, "time": int(0.5 + len(output_text) * 0.06)})
-                                f.write(output_data)
-                                global_limit_time = global_base_limit_time + int(0.5 + len(output_text) * 0.06)
-                                global_past_time = 0
+                if config["gpt-sovits"]["enable"] and output_text != "抱歉，我无法处理您的请求。":
+                    audio_time = tts_handler(config, output_text)
+                    # 处理合成的音频
+                    if audio_time is not None:
+                        print(f"音频合成完成，时长: {audio_time:.2f} 秒")
+                        with open("./Britney-v1/contact/out.json", "w", encoding="utf-8") as f:
+                            if audio_time > 3:
+                                time_value = int(audio_time) + 1
+                            else:
+                                time_value = int(0.5 + len(output_text) * 0.06)
+                            # 将输出文本和时长写入文件，同时修改global_limit_time
+                            output_data = json.dumps({"text": output_text, "time": time_value})
+                            f.write(output_data)
+                            global_limit_time = global_base_limit_time + time_value
+                            global_past_time = 0
+                            # 将音频文件移动到指定目录
+                            os.makedirs("./Britney-v1/contact", exist_ok=True)
+                            if os.path.exists("./temp/1.wav"):
+                                shutil.move("./temp/1.wav", "./Britney-v1/contact/1.wav")
+                            else:
+                                print("警告：服务器可能存在严重错误！音频文件未生成或被神秘的力量移动了！")
                     else:
-                        print("GPT-SoVITS 未启用，跳过语音合成")
-                        with open("./Britney-v1/contact/out.txt", "w", encoding="utf-8") as f:
-                            output_data = json.dumps({"text": output_text, "time": int(0.5 + len(output_text) * 0.06)})
+                        print("音频合成失败或未返回有效时长")
+                        with open("./Britney-v1/contact/out.json", "w", encoding="utf-8") as f:
+                            output_data = json.dumps(
+                                {"text": output_text, "time": int(0.5 + len(output_text) * 0.06)})
                             f.write(output_data)
                             global_limit_time = global_base_limit_time + int(0.5 + len(output_text) * 0.06)
                             global_past_time = 0
-                    # 计算处理时间
-                    cost_time = time.time() - system_start_time
-                    print(f"一轮处理时间: {cost_time:.2f} 秒")
+                else:
+                    print("GPT-SoVITS 未启用，跳过语音合成")
+                    with open("./Britney-v1/contact/out.json", "w", encoding="utf-8") as f:
+                        output_data = json.dumps({"text": output_text, "time": int(0.5 + len(output_text) * 0.06)})
+                        f.write(output_data)
+                        global_limit_time = global_base_limit_time + int(0.5 + len(output_text) * 0.06)
+                        global_past_time = 0
+                # 计算处理时间
+                cost_time = time.time() - system_start_time
+                print(f"一轮处理时间: {cost_time:.2f} 秒")
+                # 添加异常处理
+                try:
                     with open("./Britney-v1/contact/config.json", "r", encoding="utf-8") as f:
                         app_config_data = json.load(f)
                         app_config_data["isReacted"] = True
-                        app_config_data["favoribility"] = config["favoribility"] + 1;
+                        app_config_data["favorability"] = app_config_data.get("favorability", 0) + 1
                         with open("./Britney-v1/contact/config.json", "w", encoding="utf-8") as ff:
                             json.dump(app_config_data, ff, ensure_ascii=False)
+                except (FileNotFoundError, json.JSONDecodeError) as e:
+                    print(f"警告：配置文件操作失败: {e}")
 
-
-                else:
-                    print(f"未检测到有效输入，等待中({global_past_time}/{global_limit_time}秒)")
-                    global_past_time+=1
-                    time.sleep(1)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+            else:
+                print(f"未检测到有效输入，等待中({global_past_time}/{global_limit_time}秒)")
+                global_past_time+=1
+                time.sleep(1)
 
