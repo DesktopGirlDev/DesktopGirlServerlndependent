@@ -95,6 +95,7 @@ def make_final_prompt(personalityPrompt,userInfoPrompt, text):
         final_prompt = personalityPrompt+ userInfoPrompt + "这是用户的桌面截图，请你根据桌面截图与他对话"
     else:
         final_prompt = personalityPrompt + userInfoPrompt + "用户刚刚对你说了"+text
+    return final_prompt
 
 
 import google.generativeai as genai
@@ -420,7 +421,7 @@ def tts_handler(config,text):
             "ref_audio_path": config["gpt-sovits"]["reference_audio_path"],
             "text_split_method": "cut5",
             "media_type": "wav",
-            "batch_size": 10#对于绝大多数设备而言，这个值完全可以承受
+            "batch_size": 12#对于绝大多数设备而言，这个值完全可以承受
         }
 
         print(f"正在合成文本: {text}")
@@ -582,12 +583,12 @@ if __name__ == "__main__":
                     app_config_data = json.load(f)
                     app_config_data["isReacted"] = True
                     app_config_data["favoribility"] = config["favoribility"]+1;
-                    with open("./Britney-v1/contact/config.json", "w", encoding="utf-8") as f:
-                        json.dump(app_config_data, f, ensure_ascii=False)
+                    with open("./Britney-v1/contact/config.json", "w", encoding="utf-8") as ff:
+                        json.dump(app_config_data, ff, ensure_ascii=False)
             else:
                 if global_past_time >= global_limit_time and global_base_limit_time!=-1:
                     print("捕获桌面")
-
+                    system_start_time = time.time()
                     with open("./Britney-v1/contact/config.json","r",encoding="utf-8") as f:
                         app_config_data = json.load(f)
                         app_config_data["isReacted"] = False
@@ -600,6 +601,53 @@ if __name__ == "__main__":
                     else:
                         print("⚠️ LLM回复内容为空或处理失败")
                         output_text = "抱歉，我无法处理您的请求。"
+
+                    if config["gpt-sovits"]["enable"] and output_text != "抱歉，我无法处理您的请求。":
+                        audio_time = tts_handler(config, output_text)
+                        # 处理合成的音频
+                        if audio_time is not None:
+                            print(f"音频合成完成，时长: {audio_time:.2f} 秒")
+                            with open("./Britney-v1/contact/out.txt", "w", encoding="utf-8") as f:
+                                if audio_time > 3:
+                                    time_value = int(audio_time) + 1
+                                else:
+                                    time_value = int(0.5 + len(output_text) * 0.06)
+                                # 将输出文本和时长写入文件，同时修改global_limit_time
+                                output_data = json.dumps({"text": output_text, "time": time_value})
+                                f.write(output_text)
+                                global_limit_time = global_base_limit_time + time_value
+                                global_past_time = 0
+                                # 将音频文件移动到指定目录
+                                os.makedirs("./Britney-v1/contact", exist_ok=True)
+                                if os.path.exists("./temp/1.wav"):
+                                    shutil.move("./temp/1.wav", "./Britney-v1/contact/1.wav")
+                                else:
+                                    print("警告：服务器可能存在严重错误！音频文件未生成或被神秘的力量移动了！")
+                        else:
+                            print("音频合成失败或未返回有效时长")
+                            with open("./Britney-v1/contact/out.txt", "w", encoding="utf-8") as f:
+                                output_data = json.dumps(
+                                    {"text": output_text, "time": int(0.5 + len(output_text) * 0.06)})
+                                f.write(output_data)
+                                global_limit_time = global_base_limit_time + int(0.5 + len(output_text) * 0.06)
+                                global_past_time = 0
+                    else:
+                        print("GPT-SoVITS 未启用，跳过语音合成")
+                        with open("./Britney-v1/contact/out.txt", "w", encoding="utf-8") as f:
+                            output_data = json.dumps({"text": output_text, "time": int(0.5 + len(output_text) * 0.06)})
+                            f.write(output_data)
+                            global_limit_time = global_base_limit_time + int(0.5 + len(output_text) * 0.06)
+                            global_past_time = 0
+                    # 计算处理时间
+                    cost_time = time.time() - system_start_time
+                    print(f"一轮处理时间: {cost_time:.2f} 秒")
+                    with open("./Britney-v1/contact/config.json", "r", encoding="utf-8") as f:
+                        app_config_data = json.load(f)
+                        app_config_data["isReacted"] = True
+                        app_config_data["favoribility"] = config["favoribility"] + 1;
+                        with open("./Britney-v1/contact/config.json", "w", encoding="utf-8") as ff:
+                            json.dump(app_config_data, ff, ensure_ascii=False)
+
 
                 else:
                     print(f"未检测到有效输入，等待中({global_past_time}/{global_limit_time}秒)")
