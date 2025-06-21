@@ -378,14 +378,14 @@ def tts_handler(config,text):
                 if config["gpt-sovits"]["reference_audio_path"] is not None:
                     if config["gpt-sovits"]["port"] is not None:
                         if config["gpt-sovits"]["url"] is not None:
-                            if (os.path.exists(config["gpt-sovits"]["ckpt_model_path"]) and 
-                                os.path.exists(config["gpt-sovits"]["pth_model_path"]) and 
-                                os.path.exists(config["gpt-sovits"]["reference_audio_path"])):
+                            # if (os.path.exists(config["gpt-sovits"]["ckpt_model_path"]) and 
+                            #     os.path.exists(config["gpt-sovits"]["pth_model_path"]) and 
+                            #     os.path.exists(config["gpt-sovits"]["reference_audio_path"])):
                                 double_safety_check=True
-                            else:
-                                print("相关文件路径不存在")
-                                double_safety_check=False
-                                return None
+                        else:
+                            print("相关文件路径不存在")
+                            double_safety_check=False
+                            return None
     if not double_safety_check:
         print("相关文件路径不存在")
         return None
